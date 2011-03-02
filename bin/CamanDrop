@@ -1,0 +1,85 @@
+#!/usr/bin/env node
+
+var fs = require('fs'),
+watch = require('watch'),
+Caman = require('caman').Caman,
+
+config_path = '../config.json',
+config;
+
+/*
+ * Load config
+ */
+if (process.argv.length > 2) {
+  config_path = fs.process.argv[2];
+}
+
+config_path = fs.realpathSync(config_path);
+config = JSON.parse(fs.readFileSync(config_path, 'UTF-8'));
+
+try {
+  config.folder = fs.realpathSync(config.folder);
+} catch (e) {
+  // Folder doesn't exist
+  fs.mkdirSync(config.folder, 0777);
+  
+  config.folder = fs.realpathSync(config.folder);
+  fs.mkdirSync(config.folder + "/filters", 0777);
+  fs.mkdirSync(config.folder + "/renders", 0777);
+  fs.mkdirSync(config.folder + "/originals", 0777);
+  
+  console.log("Initialized CamanDrop in " + config.folder);
+}
+
+config.filters.forEach(function (filter) {
+  try {
+    fs.realpathSync(config.folder + "/filters/" + filter);
+  } catch (e) {
+    fs.mkdirSync(config.folder + "/filters/" + filter, 0777);
+  }
+});
+
+// Begin watching
+watch.createMonitor(config.folder + "/filters", function(monitor) {
+  monitor.on("created", function (f, curr, prev) {
+    console.log(f);
+    var info = parse_filename(f);
+    console.log(info);
+    if (!info) {
+      return true;
+    }
+    
+    render_image(info);
+  });
+});
+
+function parse_filename(file) {
+  var info = file.split("/").reverse();
+
+  // File not dropped in a filter folder
+  if (info[2] != 'filters') {
+    return false;
+  }
+  
+  var ext = info[0].split('.')[1].toLowerCase();
+  if (ext != 'jpg' && ext != 'jpeg' && ext != 'png') {
+    // Not an image
+    return false;
+  }
+  
+  return {
+    filter: info[1],
+    filename: info[0],
+    name: info[0].split('.')[0],
+    path: file
+  };
+}
+
+function render_image(info) {
+  Caman(info.path, function () {
+    this[info.filter]().render(function () {
+      this.save(config.folder + "/renders/" + info.filter + "-" + info.name + ".png", true);
+      fs.renameSync(info.path, config.folder + "/originals/" + info.filename);
+    });
+  });
+}
